@@ -33,12 +33,18 @@ Instructions:
 - Tailor suggestions to their tier and goal
 - Consider their measurement trend
 - Suggest exercises they aren't already doing
-- For each exercise include: name, sets, reps, and one sentence why it fits this client specifically
+- For each exercise include: name, sets, reps, and one sentence why it fits this client
 
-Respond in this exact format for each exercise:
-1. Exercise Name | sets x reps | Why: reason
-2. Exercise Name | sets x reps | Why: reason
-3. Exercise Name | sets x reps | Why: reason
+You must respond ONLY with valid JSON, no extra text, no markdown, no explanation.
+Use this exact format:
+{{
+  "title": "AI Program — <tier> <goal>",
+  "exercises": [
+    {{ "name": "Exercise Name", "sets": 3, "reps": 10, "notes": "Why this fits the client" }},
+    {{ "name": "Exercise Name", "sets": 4, "reps": 12, "notes": "Why this fits the client" }},
+    {{ "name": "Exercise Name", "sets": 3, "reps": 15, "notes": "Why this fits the client" }}
+  ]
+}}
 """)
 
 workout_chain  = prompt | llm

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -43,4 +45,9 @@ async def suggest_workout(client: ClientData):
         "currentExercises": client.currentExercises,
         "completedChallenges": client.completedChallenges,
     })
-    return {"suggestions": result.content}
+    
+    try:
+        parsed = json.loads(result.content)
+        return {"suggestions": parsed}
+    except json.JSONDecodeError:
+        return {"suggestions": result.content}
