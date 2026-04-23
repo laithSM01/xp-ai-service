@@ -1,4 +1,5 @@
 import json
+from unittest import result
 
 from fastapi import FastAPI
 from dotenv import load_dotenv
@@ -27,7 +28,8 @@ class ClientData(BaseModel):
     measurements: list
     xpLogs: list
     currentExercises: list
-    completedChallenges: int
+    completedChallenges: list  # was int, now list of titles
+    pastPrograms: list         # NEW
 
 @app.get("/")
 def root():
@@ -44,10 +46,18 @@ async def suggest_workout(client: ClientData):
         "xpLogs": client.xpLogs,
         "currentExercises": client.currentExercises,
         "completedChallenges": client.completedChallenges,
+        "pastPrograms": client.pastPrograms,
     })
     
     try:
-        parsed = json.loads(result.content)
+        clean = result.content.strip()
+        # Gemma often wraps response in ```json ... ```
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        clean = clean.strip()
+        parsed = json.loads(clean)
         return {"suggestions": parsed}
     except json.JSONDecodeError:
-        return {"suggestions": result.content}
+        return {"error": "AI returned invalid JSON", "raw": result.content}
