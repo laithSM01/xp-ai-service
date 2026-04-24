@@ -41,7 +41,7 @@ async def suggest_workout(client: ClientData):
         "age": client.age,
         "goal": client.goal,
         "currentXP": client.currentXP,
-        "currentTier": client.currentTier,
+        "currentTier": client.currentTier.capitalize,
         "measurements": client.measurements,
         "xpLogs": client.xpLogs,
         "currentExercises": client.currentExercises,

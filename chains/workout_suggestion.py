@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # llm = ChatAnthropic(model="claude-sonnet-4-20250514")
-llm = ChatOllama(model="gemma3:4b")
+llm = ChatOllama(model="qwen2.5:7b")
 
 prompt = ChatPromptTemplate.from_template("""
 You are an expert fitness coach inside a training app called GymXP.
@@ -145,25 +145,60 @@ Past Programs (build progressively on these — make this session harder or diff
 OUTPUT RULES
 ═══════════════════════════════════════
 
-1. Return the correct number of exercises for the tier + goal combination (see tier system above)
-2. Always include cardio as a separate exercise row in this format:
+1. Return a weeklySchedule array with the correct number of training days per tier:
+   - Beginner: 3 training days
+   - Novice: 3–4 training days
+   - Intermediate: 4 training days
+   - Advanced: 5–6 training days
+   - Elite: 6 training days
+   The schedule must cover 7 days total. Rest days must appear explicitly with "type": "Rest" and "exercises": [].
+
+2. The "type" field per day must reflect the tier workout style:
+   - Beginner / Novice: "Full Body"
+   - Intermediate: alternate "Upper Body" and "Lower Body"
+   - Advanced: rotate "Push", "Pull", "Legs"
+   - Elite: use specific muscle group names (e.g. "Chest & Triceps", "Back & Biceps", "Legs", "Shoulders", "Arms", "Core & Cardio")
+
+3. Cardio appears as an exercise row inside the relevant day's exercises array (not as a separate day).
+   Use this format for cardio rows:
    {{ "name": "Treadmill Cardio", "sets": 1, "reps": 20, "notes": "20 min moderate pace, after strength session. Cardio finisher for intermediate tier." }}
    (reps = minutes for cardio rows)
-3. For each exercise, notes must contain TWO things:
+
+4. Return the correct number of exercises per day for the tier + goal combination (see tier system above).
+
+5. For each exercise, notes must contain TWO things:
    - Structural info: sets/rest time, when in session (e.g. "strength-first, 90 sec rest between sets")
    - Personalization: why this fits THIS client based on their tier, goal, and measurement trend
-4. If measurement trend is concerning (fat rising, muscle dropping), mention it explicitly in at least one exercise note
-5. Do NOT repeat exercises from currentExercises
-6. Build progressively on pastPrograms if they exist
+
+6. If measurement trend is concerning (fat rising, muscle dropping), mention it explicitly in at least one exercise note.
+
+7. Do NOT repeat exercises from currentExercises.
+
+8. Build progressively on pastPrograms if they exist.
+
+9. Exercise Variation Rule (STRICT):
+- Do NOT repeat the same exercise name in more than one training day within the same weeklySchedule.
+- Each exercise must appear only once per week.
+- If an exercise is used, it is permanently excluded from all other days in that program.
 
 You must respond ONLY with valid JSON, no extra text, no markdown, no explanation.
 Use this exact format:
 {{
   "title": "AI Program — <Tier> | <Goal>",
-  "exercises": [
-    {{ "name": "Exercise Name", "sets": 3, "reps": 10, "notes": "Structural info + why this fits the client" }},
-    {{ "name": "Exercise Name", "sets": 4, "reps": 12, "notes": "Structural info + why this fits the client" }},
-    {{ "name": "Treadmill Cardio", "sets": 1, "reps": 20, "notes": "20 min cardio. Structural placement + reason based on goal and trend" }}
+  "weeklySchedule": [
+    {{
+      "day": 1,
+      "type": "Full Body",
+      "exercises": [
+        {{ "name": "Exercise Name", "sets": 3, "reps": 10, "notes": "Structural info + why this fits the client" }},
+        {{ "name": "Treadmill Cardio", "sets": 1, "reps": 20, "notes": "20 min cardio. Structural placement + reason based on goal and trend" }}
+      ]
+    }},
+    {{
+      "day": 2,
+      "type": "Rest",
+      "exercises": []
+    }}
   ]
 }}
 """)
