@@ -1,3 +1,4 @@
+import copy
 # from langchain_anthropic import ChatAnthropic
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
@@ -5,8 +6,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# LangSmith tracing fires automatically when these env vars are present in .env:
+#   LANGCHAIN_TRACING_V2=true
+#   LANGCHAIN_API_KEY=<your-langsmith-key>
+#   LANGCHAIN_PROJECT=xp-ai-service   (optional — defaults to "default")
+
 # llm = ChatAnthropic(model="claude-sonnet-4-20250514")
-llm = ChatOllama(model="qwen2.5:7b")
+llm = ChatOllama(model="deepseek-r1:8b")
 
 prompt = ChatPromptTemplate.from_template("""
 You are an expert fitness coach inside a training app called GymXP.
@@ -26,35 +32,35 @@ TIER SYSTEM — FOLLOW THIS STRICTLY
 
 BEGINNER (0–499 XP):
 - Cardio: 65% | Strength: 35%
-- Frequency: 3 days/week
+- Frequency: EXACTLY 3 training days + 4 rest days = 7 total days
 - Workout type: Full body
 - Structure: 5–10 min warm-up, 20–30 min cardio, then 3–4 exercises
 - Focus: learning movement + consistency
 
 NOVICE (500–999 XP):
 - Cardio: 55% | Strength: 45%
-- Frequency: 3–4 days/week
+- Frequency: EXACTLY 3–4 training days + 3–4 rest days = 7 total days
 - Workout type: Full body / light split
 - Structure: 15–20 min cardio, then 4–5 exercises
 - Focus: transition from cardio to resistance training
 
 INTERMEDIATE (1000–1999 XP):
 - Cardio: 40–45% | Strength: 55–60%
-- Frequency: 4 days/week
+- Frequency: EXACTLY 4 training days + 3 rest days = 7 total days
 - Workout type: Upper / Lower split
 - Structure: strength-first (4–6 exercises), then 15–20 min cardio after
 - Focus: strength progression + body recomposition
 
 ADVANCED (2000–2999 XP):
 - Cardio: 25–30% | Strength: 70–75%
-- Frequency: 5–6 days/week
+- Frequency: EXACTLY 5–6 training days + 1–2 rest days = 7 total days
 - Workout type: Push / Pull / Legs
 - Structure: 5–7 exercises per session, 10–15 min cardio finisher
 - Focus: volume + progressive overload
 
 ELITE (3000+ XP):
 - Cardio: 10–15% | Strength: 85–90%
-- Frequency: 6 days/week
+- Frequency: EXACTLY 6 training days + 1 rest day = 7 total days
 - Workout type: Muscle group splits
 - Structure: 6–8 exercises per workout, minimal cardio (optional)
 - Focus: high volume, isolation, advanced techniques (supersets, drop sets)
@@ -152,6 +158,7 @@ OUTPUT RULES
    - Advanced: 5–6 training days
    - Elite: 6 training days
    The schedule must cover 7 days total. Rest days must appear explicitly with "type": "Rest" and "exercises": [].
+   You MUST generate EXACTLY the number of training days specified for the tier. Count your training days before responding. If the count is wrong, fix it before outputting.
 
 2. The "type" field per day must reflect the tier workout style:
    - Beginner / Novice: "Full Body"
@@ -180,6 +187,7 @@ OUTPUT RULES
 - Do NOT repeat the same exercise name in more than one training day within the same weeklySchedule.
 - Each exercise must appear only once per week.
 - If an exercise is used, it is permanently excluded from all other days in that program.
+- This rule applies to ALL exercises including cardio. Treadmill Cardio, Cycling, and any other cardio exercise may only appear on ONE day. Use different cardio types on different days if cardio appears multiple times (e.g. Treadmill on day 1, Cycling on day 3).
 
 You must respond ONLY with valid JSON, no extra text, no markdown, no explanation.
 Use this exact format:
@@ -203,4 +211,49 @@ Use this exact format:
 }}
 """)
 
-workout_chain = prompt | llm
+workout_chain = (prompt | llm).with_config({
+    "run_name": "workout_suggestion",
+    "tags": ["gym-xp", "workout"],
+})
+
+TIER_TRAINING_DAYS = {
+    "beginner": 3,
+    "novice": 4,
+    "intermediate": 4,
+    "advanced": 5,
+    "elite": 6,
+}
+
+def enforce_rules(schedule: dict, tier: str) -> dict:
+    tier_key = tier.strip().lower()
+    expected = TIER_TRAINING_DAYS.get(tier_key, 4)
+
+    # Deduplicate exercises across all training days
+    seen_exercises = set()
+    for day in schedule["weeklySchedule"]:
+        if day["type"] != "Rest":
+            unique = []
+            for ex in day["exercises"]:
+                name = ex["name"].strip().lower().replace("-", " ").replace("  ", " ")
+                if name not in seen_exercises:
+                    seen_exercises.add(name)
+                    unique.append(ex)
+            day["exercises"] = unique
+
+    # Fix training day count
+    training_days = [d for d in schedule["weeklySchedule"] if d["type"] != "Rest"]
+    rest_days = [d for d in schedule["weeklySchedule"] if d["type"] == "Rest"]
+
+    if len(training_days) > expected:
+        training_days = training_days[:expected]
+    elif len(training_days) < expected:
+        while len(training_days) < expected:
+            clone = copy.deepcopy(training_days[-1])
+            training_days.append(clone)
+
+    combined = training_days + rest_days
+    for i, day in enumerate(combined):
+        day["day"] = i + 1
+    schedule["weeklySchedule"] = combined
+
+    return schedule

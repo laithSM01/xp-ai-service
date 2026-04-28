@@ -4,7 +4,7 @@ from unittest import result
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from chains.workout_suggestion import workout_chain
+from chains.workout_suggestion import workout_chain, enforce_rules
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -41,7 +41,7 @@ async def suggest_workout(client: ClientData):
         "age": client.age,
         "goal": client.goal,
         "currentXP": client.currentXP,
-        "currentTier": client.currentTier.capitalize,
+        "currentTier": client.currentTier.capitalize(),  # fix: was missing ()
         "measurements": client.measurements,
         "xpLogs": client.xpLogs,
         "currentExercises": client.currentExercises,
@@ -51,13 +51,20 @@ async def suggest_workout(client: ClientData):
     
     try:
         clean = result.content.strip()
-        # Gemma often wraps response in ```json ... ```
+
+        # Strip deepseek-r1 thinking block
+        if "<think>" in clean:
+            clean = clean.split("</think>")[-1].strip()
+
+        # Strip markdown code fences
         if clean.startswith("```"):
             clean = clean.split("```")[1]
             if clean.startswith("json"):
                 clean = clean[4:]
         clean = clean.strip()
+
         parsed = json.loads(clean)
+        parsed = enforce_rules(parsed, client.currentTier)  # add tier argument
         return {"suggestions": parsed}
     except json.JSONDecodeError:
         return {"error": "AI returned invalid JSON", "raw": result.content}
