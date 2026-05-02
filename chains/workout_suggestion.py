@@ -1,4 +1,6 @@
 import copy
+import json
+import re
 # from langchain_anthropic import ChatAnthropic
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
@@ -6,200 +8,152 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# LangSmith tracing fires automatically when these env vars are present in .env:
-#   LANGCHAIN_TRACING_V2=true
-#   LANGCHAIN_API_KEY=<your-langsmith-key>
-#   LANGCHAIN_PROJECT=xp-ai-service   (optional — defaults to "default")
-
 # llm = ChatAnthropic(model="claude-sonnet-4-20250514")
 llm = ChatOllama(model="deepseek-r1:8b")
 
-prompt = ChatPromptTemplate.from_template("""
-You are an expert fitness coach inside a training app called GymXP.
-Your job is to generate a structured workout program based on the client's tier, goal, measurements, and history.
+# ═══════════════════════════════════════
+# CHAIN 1 — ANALYSIS
+# Small focused prompt. Analyzes client data and returns a short JSON.
+# Output feeds directly into Chain 2.
+# ═══════════════════════════════════════
 
-═══════════════════════════════════════
-CLIENT PROFILE
-═══════════════════════════════════════
+analysis_prompt = ChatPromptTemplate.from_template("""
+You are a fitness data analyst. Analyze the client profile below and return a short JSON summary.
+
+CLIENT PROFILE:
 - Age: {age}
 - Goal: {goal}
 - Current XP: {currentXP}
 - Current Tier: {currentTier}
 
-═══════════════════════════════════════
-TIER SYSTEM — FOLLOW THIS STRICTLY
-═══════════════════════════════════════
-
-BEGINNER (0–499 XP):
-- Cardio: 65% | Strength: 35%
-- Frequency: EXACTLY 3 training days + 4 rest days = 7 total days
-- Workout type: Full body
-- Structure: 5–10 min warm-up, 20–30 min cardio, then 3–4 exercises
-- Focus: learning movement + consistency
-
-NOVICE (500–999 XP):
-- Cardio: 55% | Strength: 45%
-- Frequency: EXACTLY 3–4 training days + 3–4 rest days = 7 total days
-- Workout type: Full body / light split
-- Structure: 15–20 min cardio, then 4–5 exercises
-- Focus: transition from cardio to resistance training
-
-INTERMEDIATE (1000–1999 XP):
-- Cardio: 40–45% | Strength: 55–60%
-- Frequency: EXACTLY 4 training days + 3 rest days = 7 total days
-- Workout type: Upper / Lower split
-- Structure: strength-first (4–6 exercises), then 15–20 min cardio after
-- Focus: strength progression + body recomposition
-
-ADVANCED (2000–2999 XP):
-- Cardio: 25–30% | Strength: 70–75%
-- Frequency: EXACTLY 5–6 training days + 1–2 rest days = 7 total days
-- Workout type: Push / Pull / Legs
-- Structure: 5–7 exercises per session, 10–15 min cardio finisher
-- Focus: volume + progressive overload
-
-ELITE (3000+ XP):
-- Cardio: 10–15% | Strength: 85–90%
-- Frequency: EXACTLY 6 training days + 1 rest day = 7 total days
-- Workout type: Muscle group splits
-- Structure: 6–8 exercises per workout, minimal cardio (optional)
-- Focus: high volume, isolation, advanced techniques (supersets, drop sets)
-
-═══════════════════════════════════════
-GOAL ADJUSTMENTS — APPLY ON TOP OF TIER
-═══════════════════════════════════════
-
-"Fat Loss":
-- Push cardio to the MAXIMUM % for this tier
-- Add 1 extra cardio row (e.g. treadmill or cycling)
-- Keep strength at the minimum exercise count for this tier
-
-"Muscle Gain":
-- Push cardio to the MINIMUM % for this tier
-- Add 1 extra strength exercise beyond tier default
-- Focus on compound, heavy movements
-
-"Strength Building":
-- Cardio at minimum for this tier
-- Max exercise count for the tier
-- Prioritize heavy compound lifts (squat, deadlift, press variations)
-
-"General Fitness":
-- Follow tier defaults exactly, balanced approach
-
-"Endurance / Cardio":
-- Cardio at maximum for this tier
-- Add 1 extra cardio row
-- Reduce strength exercises by 1 from tier default
-
-"Body Recomposition":
-- Cardio at mid-range for this tier
-- Strength at mid-range for this tier
-- Mix of compound and isolation movements
-
-"Athletic Performance":
-- Balanced cardio and strength
-- Prioritize explosive and functional movements (jumps, sprints, power cleans)
-
-"Flexibility & Mobility":
-- Light cardio only (walking, cycling)
-- Replace some strength exercises with mobility/stretching exercises
-- Low intensity, high control movements
-
-"Rehabilitation & Recovery":
-- Very light cardio only
-- Low weight, high rep exercises only (12–20 reps)
-- No heavy compound lifts, no explosive movements
-
-"Lifestyle & Wellness":
-- Moderate cardio, moderate strength
-- Mix of enjoyable, sustainable exercises
-- Focus on consistency over intensity
-
-═══════════════════════════════════════
-MEASUREMENT TREND ANALYSIS
-═══════════════════════════════════════
-
-Recent Body Measurements (latest first — weight in kg, bodyFat and muscleMass in %):
+MEASUREMENTS (latest first, weight in kg, bodyFat and muscleMass in %):
 {measurements}
 
-IMPORTANT — Analyze this trend before generating exercises:
-- If body fat is INCREASING across the last 3 measurements: prioritize cardio, mention the trend in notes
-- If body fat is DECREASING: acknowledge progress, maintain current cardio approach
-- If muscle mass is INCREASING: acknowledge, continue strength focus
-- If muscle mass is DECREASING: flag this in notes, add more strength exercises
-- Weight and muscle mass have a positive relationship — rising weight with rising muscle is good progress
-- Rising weight with rising body fat is a warning sign — adjust cardio upward and mention it
-
-═══════════════════════════════════════
-CLIENT HISTORY
-═══════════════════════════════════════
-
-Recent XP Activity (use to understand effort and consistency):
+XP LOGS (recent activity):
 {xpLogs}
 
-Current Program Exercises (DO NOT repeat these):
-{currentExercises}
-
-Completed Challenges (use to understand client effort level and preferences):
+COMPLETED CHALLENGES:
 {completedChallenges}
 
-Past Programs (build progressively on these — make this session harder or different):
+PAST PROGRAMS:
 {pastPrograms}
 
-═══════════════════════════════════════
-OUTPUT RULES
-═══════════════════════════════════════
+CURRENT EXERCISES TO AVOID:
+{currentExercises}
 
-1. Return a weeklySchedule array with the correct number of training days per tier:
-   - Beginner: 3 training days
-   - Novice: 3–4 training days
-   - Intermediate: 4 training days
-   - Advanced: 5–6 training days
-   - Elite: 6 training days
-   The schedule must cover 7 days total. Rest days must appear explicitly with "type": "Rest" and "exercises": [].
-   You MUST generate EXACTLY the number of training days specified for the tier. Count your training days before responding. If the count is wrong, fix it before outputting.
+ANALYSIS RULES:
+- Look at the last 3 measurements only
+- If body fat is increasing: set fatTrend to "increasing", raise cardioRatio
+- If body fat is decreasing: set fatTrend to "decreasing", maintain cardioRatio
+- If muscle mass is increasing: set muscleTrend to "increasing"
+- If muscle mass is decreasing: set muscleTrend to "decreasing", flag in notes
+- Rising weight + rising body fat = warning, mention in notes
+- Rising weight + rising muscle = good progress, mention in notes
 
-2. The "type" field per day must reflect the tier workout style:
-   - Beginner / Novice: "Full Body"
-   - Intermediate: alternate "Upper Body" and "Lower Body"
-   - Advanced: rotate "Push", "Pull", "Legs"
-   - Elite: use specific muscle group names (e.g. "Chest & Triceps", "Back & Biceps", "Legs", "Shoulders", "Arms", "Core & Cardio")
+TIER TRAINING DAYS:
+- Beginner: 3
+- Novice: 4
+- Intermediate: 4
+- Advanced: 5
+- Elite: 6
 
-3. Cardio appears as an exercise row inside the relevant day's exercises array (not as a separate day).
-   Use this format for cardio rows:
-   {{ "name": "Treadmill Cardio", "sets": 1, "reps": 20, "notes": "20 min moderate pace, after strength session. Cardio finisher for intermediate tier." }}
-   (reps = minutes for cardio rows)
+GOAL CARDIO RATIO (apply on top of tier defaults):
+- Fat Loss: push cardio to maximum for tier
+- Muscle Gain: push cardio to minimum for tier
+- Strength Building: cardio at minimum
+- General Fitness: balanced, follow tier default
+- Endurance / Cardio: cardio at maximum
+- Body Recomposition: cardio at mid-range
+- Athletic Performance: balanced
+- Flexibility & Mobility: light cardio only
+- Rehabilitation & Recovery: very light cardio only
+- Lifestyle & Wellness: moderate cardio
 
-4. Return the correct number of exercises per day for the tier + goal combination (see tier system above).
-
-5. For each exercise, notes must contain TWO things:
-   - Structural info: sets/rest time, when in session (e.g. "strength-first, 90 sec rest between sets")
-   - Personalization: why this fits THIS client based on their tier, goal, and measurement trend
-
-6. If measurement trend is concerning (fat rising, muscle dropping), mention it explicitly in at least one exercise note.
-
-7. Do NOT repeat exercises from currentExercises.
-
-8. Build progressively on pastPrograms if they exist.
-
-9. Exercise Variation Rule (STRICT):
-- Do NOT repeat the same exercise name in more than one training day within the same weeklySchedule.
-- Each exercise must appear only once per week.
-- If an exercise is used, it is permanently excluded from all other days in that program.
-- This rule applies to ALL exercises including cardio. Treadmill Cardio, Cycling, and any other cardio exercise may only appear on ONE day. Use different cardio types on different days if cardio appears multiple times (e.g. Treadmill on day 1, Cycling on day 3).
-
-You must respond ONLY with valid JSON, no extra text, no markdown, no explanation.
+You MUST respond ONLY with valid JSON, no extra text, no markdown, no explanation.
 Use this exact format:
 {{
-  "title": "AI Program — <Tier> | <Goal>",
+  "fatTrend": "increasing" | "decreasing" | "stable",
+  "muscleTrend": "increasing" | "decreasing" | "stable",
+  "trainingDays": 3,
+  "cardioRatio": 65,
+  "strengthRatio": 35,
+  "focus": "cardio priority",
+  "notes": "Short observation about the client trend and what to prioritize",
+  "currentExercisesToAvoid": ["exercise1", "exercise2"]
+}}
+""")
+
+analysis_chain = (analysis_prompt | llm).with_config({
+    "run_name": "workout_analysis",
+    "tags": ["gym-xp", "analysis"],
+})
+
+
+# ═══════════════════════════════════════
+# CHAIN 2 — GENERATION
+# Takes analysis output from Chain 1.
+# Generates the weekly schedule JSON only.
+# ═══════════════════════════════════════
+
+generation_prompt = ChatPromptTemplate.from_template("""
+You are an expert fitness coach. Generate a weekly workout schedule based on the analysis below.
+
+CLIENT:
+- Age: {age}
+- Goal: {goal}
+- Tier: {currentTier}
+
+ANALYSIS SUMMARY:
+- Fat Trend: {fatTrend}
+- Muscle Trend: {muscleTrend}
+- Training Days: {trainingDays}
+- Cardio Ratio: {cardioRatio}%
+- Strength Ratio: {strengthRatio}%
+- Focus: {focus}
+- Coach Notes: {notes}
+
+EXERCISES TO AVOID (do not use any of these):
+{currentExercisesToAvoid}
+
+WORKOUT TYPE PER TIER:
+- Beginner / Novice: "Full Body"
+- Intermediate: alternate "Upper Body" and "Lower Body"
+- Advanced: rotate "Push", "Pull", "Legs"
+- Elite: specific muscle groups (e.g. "Chest & Triceps", "Back & Biceps", "Legs", "Shoulders", "Arms", "Core & Cardio")
+
+EXERCISE COUNT PER DAY:
+- Beginner: 3-4 exercises
+- Novice: 4-5 exercises
+- Intermediate: 4-6 exercises
+- Advanced: 5-7 exercises
+- Elite: 6-8 exercises
+
+OUTPUT RULES:
+1. Generate exactly {trainingDays} training days + enough rest days to total 7 days
+2. Cardio appears as an exercise row inside the day, NOT as a separate day
+3. Every exercise must have: "name", "sets", "reps", "notes"
+4. "reps" is ALWAYS a number — never a string. For cardio, reps = minutes as a number (e.g. 20 not "20 min")
+5. Do NOT repeat the same exercise name across different training days
+6. 6. Each exercise name must be unique across the entire week. Before writing each exercise, check all exercises already written in previous days. If the name already exists, choose a different exercise.
+7. If fatTrend is "increasing", mention it in at least one exercise note
+8. Exercise notes must include: sets/rest info AND why it fits this client
+
+CRITICAL: The JSON keys must be exactly "weeklySchedule", "day", "type", "exercises". Do not use "days", "rest", or any other key names.
+
+CARDIO FORMAT EXAMPLE:
+{{ "name": "Treadmill Cardio", "sets": 1, "reps": 20, "notes": "20 min moderate pace. Cardio finisher matching fat loss goal." }}
+
+You MUST respond ONLY with valid JSON, no extra text, no markdown, no explanation.
+Use this exact format:
+{{
+  "title": "AI Program — {currentTier} | {goal}",
   "weeklySchedule": [
     {{
       "day": 1,
       "type": "Full Body",
       "exercises": [
         {{ "name": "Exercise Name", "sets": 3, "reps": 10, "notes": "Structural info + why this fits the client" }},
-        {{ "name": "Treadmill Cardio", "sets": 1, "reps": 20, "notes": "20 min cardio. Structural placement + reason based on goal and trend" }}
+        {{ "name": "Treadmill Cardio", "sets": 1, "reps": 20, "notes": "20 min cardio. Placement + reason." }}
       ]
     }},
     {{
@@ -211,10 +165,15 @@ Use this exact format:
 }}
 """)
 
-workout_chain = (prompt | llm).with_config({
-    "run_name": "workout_suggestion",
-    "tags": ["gym-xp", "workout"],
+generation_chain = (generation_prompt | llm).with_config({
+    "run_name": "workout_generation",
+    "tags": ["gym-xp", "generation"],
 })
+
+
+# ═══════════════════════════════════════
+# TIER RULES
+# ═══════════════════════════════════════
 
 TIER_TRAINING_DAYS = {
     "beginner": 3,
@@ -223,6 +182,11 @@ TIER_TRAINING_DAYS = {
     "advanced": 5,
     "elite": 6,
 }
+
+
+# ═══════════════════════════════════════
+# ENFORCE RULES — post-processing safety net
+# ═══════════════════════════════════════
 
 def enforce_rules(schedule: dict, tier: str) -> dict:
     tier_key = tier.strip().lower()
@@ -234,7 +198,8 @@ def enforce_rules(schedule: dict, tier: str) -> dict:
         if day["type"] != "Rest":
             unique = []
             for ex in day["exercises"]:
-                name = ex["name"].strip().lower().replace("-", " ").replace("  ", " ")
+                name = re.sub(r'[^a-z0-9 ]', '', ex["name"].strip().lower())
+                name = re.sub(r'\s+', ' ', name).strip()
                 if name not in seen_exercises:
                     seen_exercises.add(name)
                     unique.append(ex)
@@ -249,6 +214,7 @@ def enforce_rules(schedule: dict, tier: str) -> dict:
     elif len(training_days) < expected:
         while len(training_days) < expected:
             clone = copy.deepcopy(training_days[-1])
+            clone["exercises"] = []
             training_days.append(clone)
 
     combined = training_days + rest_days

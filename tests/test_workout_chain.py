@@ -1,32 +1,84 @@
-import copy
 import json
 import pytest
-from chains.workout_suggestion import workout_chain, enforce_rules
+from chains.workout_suggestion import analysis_chain, generation_chain, enforce_rules
+
+try:
+    from json_repair import repair_json
+    HAS_JSON_REPAIR = True
+except ImportError:
+    HAS_JSON_REPAIR = False
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _parse(result, tier: str) -> dict:
-    raw = result.content.strip()
-    if "<think>" in raw:
-        raw = raw.split("</think>")[-1].strip()
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) > 1 else parts[0]
-        if raw.startswith("json"):
-            raw = raw[4:]
+def _strip_raw(content: str) -> str:
+    clean = content.strip()
+    if "<think>" in clean:
+        clean = clean.split("</think>")[-1].strip()
+    if clean.startswith("```"):
+        clean = clean.split("```")[1]
+        if clean.startswith("json"):
+            clean = clean[4:]
+    return clean.strip()
+
+
+def _parse_json(raw: str) -> dict:
     try:
-        parsed = json.loads(raw.strip())
+        return json.loads(raw)
     except json.JSONDecodeError:
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        parsed = json.loads(raw[start:end])
-    return enforce_rules(parsed, tier)
+        pass
+
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        try:
+            return json.loads(raw[start:end])
+        except json.JSONDecodeError:
+            pass
+
+    if HAS_JSON_REPAIR:
+        try:
+            return json.loads(repair_json(raw))
+        except Exception:
+            pass
+
+    raise ValueError(f"Could not parse JSON from LLM output: {raw[:200]}")
 
 
 def _run(input_data: dict) -> dict:
-    result = workout_chain.invoke(input_data)
-    return _parse(result, input_data["currentTier"])
+    tier = input_data["currentTier"].capitalize()
+
+    # Chain 1 — Analyze
+    analysis_result = analysis_chain.invoke({
+        "age": input_data["age"],
+        "goal": input_data["goal"],
+        "currentXP": input_data["currentXP"],
+        "currentTier": tier,
+        "measurements": input_data["measurements"],
+        "xpLogs": input_data["xpLogs"],
+        "currentExercises": input_data["currentExercises"],
+        "completedChallenges": input_data["completedChallenges"],
+        "pastPrograms": input_data["pastPrograms"],
+    })
+    analysis = _parse_json(_strip_raw(analysis_result.content))
+
+    # Chain 2 — Generate
+    generation_result = generation_chain.invoke({
+        "age": input_data["age"],
+        "goal": input_data["goal"],
+        "currentTier": tier,
+        "fatTrend": analysis.get("fatTrend", "stable"),
+        "muscleTrend": analysis.get("muscleTrend", "stable"),
+        "trainingDays": analysis.get("trainingDays", 3),
+        "cardioRatio": analysis.get("cardioRatio", 50),
+        "strengthRatio": analysis.get("strengthRatio", 50),
+        "focus": analysis.get("focus", "balanced"),
+        "notes": analysis.get("notes", ""),
+        "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
+    })
+    parsed = _parse_json(_strip_raw(generation_result.content))
+    print(json.dumps(parsed, indent=2))
+    return enforce_rules(parsed, tier)
 
 
 def _assert_valid_program(data: dict, min_days: int, max_days: int) -> None:
@@ -63,12 +115,18 @@ def _assert_valid_program(data: dict, min_days: int, max_days: int) -> None:
             )
             seen[name] = day["day"]
 
+    # 5. Reps is always a number
+    for day in training_days:
+        for ex in day["exercises"]:
+            assert isinstance(ex["reps"], (int, float)), (
+                f"Exercise '{ex['name']}' has non-numeric reps: {ex['reps']}"
+            )
+
 
 # ── Test profiles ─────────────────────────────────────────────────────────────
 
 PROFILES = [
     pytest.param(
-        # Profile 1 -- Beginner, Fat Loss, 0 XP, age 30, no history
         {
             "age": 30,
             "goal": "Fat Loss",
@@ -84,7 +142,6 @@ PROFILES = [
         id="beginner_fat_loss_age30",
     ),
     pytest.param(
-        # Profile 2 -- Novice, Muscle Gain, 500 XP, age 25, no history
         {
             "age": 25,
             "goal": "Muscle Gain",
@@ -100,7 +157,6 @@ PROFILES = [
         id="novice_muscle_gain_age25",
     ),
     pytest.param(
-        # Profile 3 -- Intermediate, Strength Building, 1500 XP, age 35, 2 past programs
         {
             "age": 35,
             "goal": "Strength Building",
@@ -113,21 +169,11 @@ PROFILES = [
             "pastPrograms": [
                 {
                     "title": "Strength Phase 1",
-                    "exercises": [
-                        "Barbell Squat",
-                        "Bench Press",
-                        "Barbell Row",
-                        "Overhead Press",
-                    ],
+                    "exercises": ["Barbell Squat", "Bench Press", "Barbell Row", "Overhead Press"],
                 },
                 {
                     "title": "Strength Phase 2",
-                    "exercises": [
-                        "Romanian Deadlift",
-                        "Incline Bench Press",
-                        "Lat Pulldown",
-                        "Dumbbell Shoulder Press",
-                    ],
+                    "exercises": ["Romanian Deadlift", "Incline Bench Press", "Lat Pulldown", "Dumbbell Shoulder Press"],
                 },
             ],
         },
@@ -135,8 +181,6 @@ PROFILES = [
         id="intermediate_strength_age35_2programs",
     ),
     pytest.param(
-        # Profile 4 -- Advanced, Body Recomposition, 2500 XP, age 28,
-        #              measurements show body fat trending upward (warning sign)
         {
             "age": 28,
             "goal": "Body Recomposition",
@@ -156,7 +200,6 @@ PROFILES = [
         id="advanced_recomp_fat_increasing_age28",
     ),
     pytest.param(
-        # Profile 5 -- Edge case: Beginner, Fat Loss, 0 XP, age 58, single measurement
         {
             "age": 58,
             "goal": "Fat Loss",
