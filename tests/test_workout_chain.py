@@ -44,7 +44,6 @@ def _parse_json(raw: str) -> dict:
 
     raise ValueError(f"Could not parse JSON from LLM output: {raw[:200]}")
 
-
 def _run(input_data: dict) -> dict:
     tier = input_data["currentTier"].capitalize()
 
@@ -59,6 +58,10 @@ def _run(input_data: dict) -> dict:
         "currentExercises": input_data["currentExercises"],
         "completedChallenges": input_data["completedChallenges"],
         "pastPrograms": input_data["pastPrograms"],
+        "height": input_data.get("height", 175.0),
+        "bodyShape": input_data.get("bodyShape", "unknown"),
+        "sportType": input_data.get("sportType", "gym"),
+        "trainerNotes": input_data.get("trainerNotes", ""),
     })
     analysis = _parse_json(_strip_raw(analysis_result.content))
 
@@ -75,11 +78,14 @@ def _run(input_data: dict) -> dict:
         "focus": analysis.get("focus", "balanced"),
         "notes": analysis.get("notes", ""),
         "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
+        "height": input_data.get("height", 175.0),
+        "bodyShape": input_data.get("bodyShape", "unknown"),
+        "sportType": input_data.get("sportType", "gym"),
+        "trainerNotes": input_data.get("trainerNotes", ""),
     })
     parsed = _parse_json(_strip_raw(generation_result.content))
     print(json.dumps(parsed, indent=2))
     return enforce_rules(parsed, tier)
-
 
 def _assert_valid_program(data: dict, min_days: int, max_days: int) -> None:
     # 1. Top-level keys

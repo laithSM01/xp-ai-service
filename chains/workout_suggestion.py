@@ -25,6 +25,10 @@ CLIENT PROFILE:
 - Goal: {goal}
 - Current XP: {currentXP}
 - Current Tier: {currentTier}
+- Height: {height}cm
+- Body Shape: {bodyShape}
+- Sport Type: {sportType}
+- Trainer Notes: {trainerNotes}
 
 MEASUREMENTS (latest first, weight in kg, bodyFat and muscleMass in %):
 {measurements}
@@ -69,6 +73,19 @@ GOAL CARDIO RATIO (apply on top of tier defaults):
 - Rehabilitation & Recovery: very light cardio only
 - Lifestyle & Wellness: moderate cardio
 
+BODY SHAPE RULES:
+- athletic: maintain current balance, push intensity
+- endomorph: prioritize fat loss, higher cardio regardless of goal
+- ectomorph: prioritize muscle gain, minimize cardio
+- mesomorph: balanced, follow goal as primary driver
+- unknown: follow goal only
+
+SPORT TYPE CONTEXT:
+- gym: standard resistance training
+- swimming: low impact, focus on endurance and full body
+- football: explosive power, agility, conditioning
+- rehab: low impact only, avoid heavy compound lifts
+
 You MUST respond ONLY with valid JSON, no extra text, no markdown, no explanation.
 Use this exact format:
 {{
@@ -102,6 +119,10 @@ CLIENT:
 - Age: {age}
 - Goal: {goal}
 - Tier: {currentTier}
+- Height: {height}cm
+- Body Shape: {bodyShape}
+- Sport Type: {sportType}
+- Trainer Notes: {trainerNotes}
 
 ANALYSIS SUMMARY:
 - Fat Trend: {fatTrend}
@@ -137,6 +158,8 @@ OUTPUT RULES:
 6. 6. Each exercise name must be unique across the entire week. Before writing each exercise, check all exercises already written in previous days. If the name already exists, choose a different exercise.
 7. If fatTrend is "increasing", mention it in at least one exercise note
 8. Exercise notes must include: sets/rest info AND why it fits this client
+9. If trainerNotes is not empty, treat it as high priority instruction — override defaults if needed
+10. Body shape must influence exercise selection — endomorph gets more cardio, ectomorph gets heavier compound lifts, athletic gets intensity focus
 
 CRITICAL: The JSON keys must be exactly "weeklySchedule", "day", "type", "exercises". Do not use "days", "rest", or any other key names.
 

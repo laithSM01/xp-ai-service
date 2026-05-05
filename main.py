@@ -22,6 +22,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def calculate_body_shape(weight: float, height: float, body_fat: float, muscle_mass: float) -> str:
+    bmi = weight / (height / 100) ** 2
+    if muscle_mass > 40 and body_fat < 15:
+        return "athletic"
+    elif body_fat > 30 and muscle_mass < 30:
+        return "endomorph"
+    elif bmi < 18.5:
+        return "ectomorph"
+    else:
+        return "mesomorph"
+    
+
+SPORT_CHAINS = {
+    "gym": analysis_chain,
+    # "swimming": swimming_analysis_chain,  # future
+    # "football": football_analysis_chain,  # future
+    # "rehab": rehab_analysis_chain,        # future
+}
+
+def get_chain_for_sport(sport_type: str):
+    return SPORT_CHAINS.get(sport_type.lower(), analysis_chain)
+
 class ClientData(BaseModel):
     age: int
     goal: str
@@ -32,6 +54,9 @@ class ClientData(BaseModel):
     currentExercises: list
     completedChallenges: list
     pastPrograms: list
+    height: float
+    sportType: str  # "gym" | "swimming" | "football" | "rehab"
+    trainerNotes: str | None = None
 
 
 def _strip_raw(content: str) -> str:
@@ -85,8 +110,20 @@ def root():
 async def suggest_workout(client: ClientData):
     tier = client.currentTier.capitalize()
 
+    print(client.model_dump())
+
+    # Calculate body shape from latest measurement
+    latest = client.measurements[0] if client.measurements else None
+    body_shape = calculate_body_shape(
+        latest["weight"], client.height,
+        latest["bodyFat"], latest["muscleMass"]
+    ) if latest else "unknown"
+
+    # Route to correct chain based on sport
+    chain = get_chain_for_sport(client.sportType)
+
     # ── Chain 1: Analyze client data ──
-    analysis_result = await analysis_chain.ainvoke({
+    analysis_result = await chain.ainvoke({
         "age": client.age,
         "goal": client.goal,
         "currentXP": client.currentXP,
@@ -96,6 +133,10 @@ async def suggest_workout(client: ClientData):
         "currentExercises": client.currentExercises,
         "completedChallenges": client.completedChallenges,
         "pastPrograms": client.pastPrograms,
+        "bodyShape": body_shape,
+        "height": client.height,
+        "sportType": client.sportType,
+        "trainerNotes": client.trainerNotes or "",
     })
 
     try:
@@ -117,6 +158,10 @@ async def suggest_workout(client: ClientData):
         "focus": analysis.get("focus", "balanced"),
         "notes": analysis.get("notes", ""),
         "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
+        "bodyShape": body_shape,
+        "sportType": client.sportType,
+        "trainerNotes": client.trainerNotes or "",
+        "height": client.height,
     })
 
     try:
