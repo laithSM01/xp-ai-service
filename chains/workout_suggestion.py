@@ -27,7 +27,7 @@ CLIENT PROFILE:
 - Current Tier: {currentTier}
 - Height: {height}cm
 - Body Shape: {bodyShape}
-- Sport Type: {sportType}
+- Sport Types: {sportTypes}
 - Trainer Notes: {trainerNotes}
 
 MEASUREMENTS (latest first, weight in kg, bodyFat and muscleMass in %):
@@ -121,7 +121,7 @@ CLIENT:
 - Tier: {currentTier}
 - Height: {height}cm
 - Body Shape: {bodyShape}
-- Sport Type: {sportType}
+- Sport Types: {sportTypes}
 - Trainer Notes: {trainerNotes}
 
 ANALYSIS SUMMARY:

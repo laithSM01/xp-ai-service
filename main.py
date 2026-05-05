@@ -41,8 +41,9 @@ SPORT_CHAINS = {
     # "rehab": rehab_analysis_chain,        # future
 }
 
-def get_chain_for_sport(sport_type: str):
-    return SPORT_CHAINS.get(sport_type.lower(), analysis_chain)
+def get_chain_for_sport(sport_types: list[str]):
+    primary = sport_types[0] if sport_types else 'gym'
+    return SPORT_CHAINS.get(primary.lower(), analysis_chain)
 
 class ClientData(BaseModel):
     age: int
@@ -55,7 +56,7 @@ class ClientData(BaseModel):
     completedChallenges: list
     pastPrograms: list
     height: float
-    sportType: str  # "gym" | "swimming" | "football" | "rehab"
+    sportTypes: list[str]
     trainerNotes: str | None = None
 
 
@@ -120,7 +121,7 @@ async def suggest_workout(client: ClientData):
     ) if latest else "unknown"
 
     # Route to correct chain based on sport
-    chain = get_chain_for_sport(client.sportType)
+    chain = get_chain_for_sport(client.sportTypes)
 
     # ── Chain 1: Analyze client data ──
     analysis_result = await chain.ainvoke({
@@ -135,7 +136,7 @@ async def suggest_workout(client: ClientData):
         "pastPrograms": client.pastPrograms,
         "bodyShape": body_shape,
         "height": client.height,
-        "sportType": client.sportType,
+        "sportTypes": ", ".join(client.sportTypes),
         "trainerNotes": client.trainerNotes or "",
     })
 
@@ -159,7 +160,7 @@ async def suggest_workout(client: ClientData):
         "notes": analysis.get("notes", ""),
         "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
         "bodyShape": body_shape,
-        "sportType": client.sportType,
+        "sportTypes": ", ".join(client.sportTypes),
         "trainerNotes": client.trainerNotes or "",
         "height": client.height,
     })
