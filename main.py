@@ -2,7 +2,8 @@ import json
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from chains.workout_suggestion import analysis_chain, generation_chain, enforce_rules
+from chains.workout_suggestion import analysis_chain, enforce_rules
+from chains.tiers import get_generation_chain
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
@@ -147,6 +148,7 @@ async def suggest_workout(client: ClientData):
         return {"error": "Analysis chain returned invalid JSON", "raw": analysis_result.content}
 
     # ── Chain 2: Generate workout from analysis ──
+    generation_chain = get_generation_chain(tier)
     generation_result = await generation_chain.ainvoke({
         "age": client.age,
         "goal": client.goal,

@@ -1,6 +1,7 @@
 import json
 import pytest
-from chains.workout_suggestion import analysis_chain, generation_chain, enforce_rules
+from chains.workout_suggestion import analysis_chain, enforce_rules
+from chains.tiers import get_generation_chain
 
 try:
     from json_repair import repair_json
@@ -60,12 +61,13 @@ def _run(input_data: dict) -> dict:
         "pastPrograms": input_data["pastPrograms"],
         "height": input_data.get("height", 175.0),
         "bodyShape": input_data.get("bodyShape", "unknown"),
-        "sportType": input_data.get("sportType", "gym"),
+        "sportTypes": input_data.get("sportTypes", "gym"),
         "trainerNotes": input_data.get("trainerNotes", ""),
     })
     analysis = _parse_json(_strip_raw(analysis_result.content))
 
     # Chain 2 — Generate
+    generation_chain = get_generation_chain(tier)
     generation_result = generation_chain.invoke({
         "age": input_data["age"],
         "goal": input_data["goal"],
@@ -80,7 +82,7 @@ def _run(input_data: dict) -> dict:
         "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
         "height": input_data.get("height", 175.0),
         "bodyShape": input_data.get("bodyShape", "unknown"),
-        "sportType": input_data.get("sportType", "gym"),
+        "sportTypes": input_data.get("sportTypes", "gym"),
         "trainerNotes": input_data.get("trainerNotes", ""),
     })
     parsed = _parse_json(_strip_raw(generation_result.content))
