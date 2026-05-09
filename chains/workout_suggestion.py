@@ -86,6 +86,12 @@ SPORT TYPE CONTEXT:
 - football: explosive power, agility, conditioning
 - rehab: low impact only, avoid heavy compound lifts
 
+INJURY CONTEXT (retrieved from knowledge base):
+{injuryContext}
+
+If injury context is provided above, it overrides all defaults. Populate currentExercisesToAvoid based on it.
+If the injury context is empty, ignore this section and follow the rules above as normal.
+
 You MUST respond ONLY with valid JSON, no extra text, no markdown, no explanation.
 Use this exact format:
 {{

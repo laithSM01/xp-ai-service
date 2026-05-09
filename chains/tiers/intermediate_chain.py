@@ -2,7 +2,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from .base import OUTPUT_RULES
 
-llm = ChatOllama(model="deepseek-r1:8b")
+llm = ChatOllama(model="deepseek-r1:14b")
 
 _PROMPT = """
 You are an expert fitness coach specializing in intermediate trainees. Generate a weekly workout schedule for the client below.

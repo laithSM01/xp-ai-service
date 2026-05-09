@@ -59,6 +59,7 @@ class ClientData(BaseModel):
     height: float
     sportTypes: list[str]
     trainerNotes: str | None = None
+    injuryNotes: str | None = None
 
 
 def _strip_raw(content: str) -> str:
@@ -110,67 +111,9 @@ def root():
 
 @app.post("/suggest/workout")
 async def suggest_workout(client: ClientData):
-    tier = client.currentTier.capitalize()
-
-    print(client.model_dump())
-
-    # Calculate body shape from latest measurement
-    latest = client.measurements[0] if client.measurements else None
-    body_shape = calculate_body_shape(
-        latest["weight"], client.height,
-        latest["bodyFat"], latest["muscleMass"]
-    ) if latest else "unknown"
-
-    # Route to correct chain based on sport
-    chain = get_chain_for_sport(client.sportTypes)
-
-    # ── Chain 1: Analyze client data ──
-    analysis_result = await chain.ainvoke({
-        "age": client.age,
-        "goal": client.goal,
-        "currentXP": client.currentXP,
-        "currentTier": tier,
-        "measurements": client.measurements,
-        "xpLogs": client.xpLogs,
-        "currentExercises": client.currentExercises,
-        "completedChallenges": client.completedChallenges,
-        "pastPrograms": client.pastPrograms,
-        "bodyShape": body_shape,
-        "height": client.height,
-        "sportTypes": ", ".join(client.sportTypes),
-        "trainerNotes": client.trainerNotes or "",
-    })
-
+    from agents.orchestrator import run as orchestrator_run
     try:
-        analysis_raw = _strip_raw(analysis_result.content)
-        analysis = _parse_json(analysis_raw)
-    except (ValueError, Exception) as e:
-        return {"error": "Analysis chain returned invalid JSON", "raw": analysis_result.content}
-
-    # ── Chain 2: Generate workout from analysis ──
-    generation_chain = get_generation_chain(tier)
-    generation_result = await generation_chain.ainvoke({
-        "age": client.age,
-        "goal": client.goal,
-        "currentTier": tier,
-        "fatTrend": analysis.get("fatTrend", "stable"),
-        "muscleTrend": analysis.get("muscleTrend", "stable"),
-        "trainingDays": analysis.get("trainingDays", 3),
-        "cardioRatio": analysis.get("cardioRatio", 50),
-        "strengthRatio": analysis.get("strengthRatio", 50),
-        "focus": analysis.get("focus", "balanced"),
-        "notes": analysis.get("notes", ""),
-        "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
-        "bodyShape": body_shape,
-        "sportTypes": ", ".join(client.sportTypes),
-        "trainerNotes": client.trainerNotes or "",
-        "height": client.height,
-    })
-
-    try:
-        generation_raw = _strip_raw(generation_result.content)
-        parsed = _parse_json(generation_raw)
-        parsed = enforce_rules(parsed, tier)
-        return {"suggestions": parsed}
-    except (ValueError, Exception) as e:
-        return {"error": "Generation chain returned invalid JSON", "raw": generation_result.content}
+        result = await orchestrator_run(client)
+        return {"suggestions": result}
+    except Exception as e:
+        return {"error": str(e)}

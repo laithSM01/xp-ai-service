@@ -1,93 +1,20 @@
 import json
 import pytest
-from chains.workout_suggestion import analysis_chain, enforce_rules
-from chains.tiers import get_generation_chain
-
-try:
-    from json_repair import repair_json
-    HAS_JSON_REPAIR = True
-except ImportError:
-    HAS_JSON_REPAIR = False
+from main import ClientData
+from agents.gym_expert import run as gym_expert_run
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _strip_raw(content: str) -> str:
-    clean = content.strip()
-    if "<think>" in clean:
-        clean = clean.split("</think>")[-1].strip()
-    if clean.startswith("```"):
-        clean = clean.split("```")[1]
-        if clean.startswith("json"):
-            clean = clean[4:]
-    return clean.strip()
-
-
-def _parse_json(raw: str) -> dict:
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-
-    start = raw.find("{")
-    end = raw.rfind("}") + 1
-    if start != -1 and end > start:
-        try:
-            return json.loads(raw[start:end])
-        except json.JSONDecodeError:
-            pass
-
-    if HAS_JSON_REPAIR:
-        try:
-            return json.loads(repair_json(raw))
-        except Exception:
-            pass
-
-    raise ValueError(f"Could not parse JSON from LLM output: {raw[:200]}")
-
-def _run(input_data: dict) -> dict:
-    tier = input_data["currentTier"].capitalize()
-
-    # Chain 1 — Analyze
-    analysis_result = analysis_chain.invoke({
-        "age": input_data["age"],
-        "goal": input_data["goal"],
-        "currentXP": input_data["currentXP"],
-        "currentTier": tier,
-        "measurements": input_data["measurements"],
-        "xpLogs": input_data["xpLogs"],
-        "currentExercises": input_data["currentExercises"],
-        "completedChallenges": input_data["completedChallenges"],
-        "pastPrograms": input_data["pastPrograms"],
+async def _run(input_data: dict) -> dict:
+    client = ClientData(**{
+        **input_data,
+        "injuryNotes": input_data.get("injuryNotes", ""),
+        "sportTypes": input_data.get("sportTypes", ["gym"]),
         "height": input_data.get("height", 175.0),
-        "bodyShape": input_data.get("bodyShape", "unknown"),
-        "sportTypes": input_data.get("sportTypes", "gym"),
         "trainerNotes": input_data.get("trainerNotes", ""),
     })
-    analysis = _parse_json(_strip_raw(analysis_result.content))
-
-    # Chain 2 — Generate
-    generation_chain = get_generation_chain(tier)
-    generation_result = generation_chain.invoke({
-        "age": input_data["age"],
-        "goal": input_data["goal"],
-        "currentTier": tier,
-        "fatTrend": analysis.get("fatTrend", "stable"),
-        "muscleTrend": analysis.get("muscleTrend", "stable"),
-        "trainingDays": analysis.get("trainingDays", 3),
-        "cardioRatio": analysis.get("cardioRatio", 50),
-        "strengthRatio": analysis.get("strengthRatio", 50),
-        "focus": analysis.get("focus", "balanced"),
-        "notes": analysis.get("notes", ""),
-        "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
-        "height": input_data.get("height", 175.0),
-        "bodyShape": input_data.get("bodyShape", "unknown"),
-        "sportTypes": input_data.get("sportTypes", "gym"),
-        "trainerNotes": input_data.get("trainerNotes", ""),
-    })
-    parsed = _parse_json(_strip_raw(generation_result.content))
-    print(json.dumps(parsed, indent=2))
-    return enforce_rules(parsed, tier)
+    return await gym_expert_run(client)
 
 def _assert_valid_program(data: dict, min_days: int, max_days: int) -> None:
     # 1. Top-level keys
@@ -229,7 +156,8 @@ PROFILES = [
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("input_data,min_days,max_days", PROFILES)
-def test_workout_chain(input_data: dict, min_days: int, max_days: int) -> None:
-    data = _run(input_data)
+async def test_workout_chain(input_data: dict, min_days: int, max_days: int) -> None:
+    data = await _run(input_data)
     _assert_valid_program(data, min_days, max_days)
