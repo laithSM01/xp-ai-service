@@ -96,27 +96,64 @@ async def run(client) -> dict:
         raise ValueError(f"Analysis chain returned invalid JSON: {analysis_result.content}") from e
 
     generation_chain = get_generation_chain(tier)
-    generation_result = await generation_chain.ainvoke({
-        "age": client.age,
-        "goal": client.goal,
-        "currentTier": tier,
-        "fatTrend": analysis.get("fatTrend", "stable"),
-        "muscleTrend": analysis.get("muscleTrend", "stable"),
-        "trainingDays": analysis.get("trainingDays", 3),
-        "cardioRatio": analysis.get("cardioRatio", 50),
-        "strengthRatio": analysis.get("strengthRatio", 50),
-        "focus": analysis.get("focus", "balanced"),
-        "notes": analysis.get("notes", ""),
-        "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
-        "bodyShape": body_shape,
-        "sportTypes": ", ".join(client.sportTypes),
-        "trainerNotes": client.trainerNotes or "",
-        "height": client.height,
-    })
 
-    try:
-        generation_raw = _strip_raw(generation_result.content)
-        parsed = _parse_json(generation_raw)
-        return enforce_rules(parsed, tier)
-    except (ValueError, Exception) as e:
-        raise ValueError(f"Generation chain returned invalid JSON: {generation_result.content}") from e
+    MAX_RETRIES = 2
+    has_injury = bool(
+        client.injuryNotes
+        and client.injuryNotes.strip()
+        and client.injuryNotes.strip().lower() != "none"
+    )
+
+    last_parsed = None
+    last_failures = []
+
+    for attempt in range(MAX_RETRIES + 1):
+        generation_result = await generation_chain.ainvoke({
+            "age": client.age,
+            "goal": client.goal,
+            "currentTier": tier,
+            "fatTrend": analysis.get("fatTrend", "stable"),
+            "muscleTrend": analysis.get("muscleTrend", "stable"),
+            "trainingDays": analysis.get("trainingDays", 3),
+            "cardioRatio": analysis.get("cardioRatio", 50),
+            "strengthRatio": analysis.get("strengthRatio", 50),
+            "focus": analysis.get("focus", "balanced"),
+            "notes": analysis.get("notes", ""),
+            "currentExercisesToAvoid": analysis.get("currentExercisesToAvoid", []),
+            "bodyShape": body_shape,
+            "sportTypes": ", ".join(client.sportTypes),
+            "trainerNotes": client.trainerNotes or "",
+            "height": client.height,
+        })
+
+        try:
+            generation_raw = _strip_raw(generation_result.content)
+            parsed = _parse_json(generation_raw)
+            enforced = enforce_rules(parsed, tier)
+        except (ValueError, Exception) as e:
+            last_failures = [f"JSON parse failed: {str(e)}"]
+            last_parsed = None
+            continue
+
+        from evaluator import evaluate
+        result = evaluate(enforced, tier.lower(), injury_context)
+
+        if result.passed:
+            return enforced
+
+        last_parsed = enforced
+        last_failures = result.failures
+
+        if attempt < MAX_RETRIES:
+            continue
+
+    if has_injury and last_failures:
+        raise ValueError(
+            f"Could not generate a safe workout after {MAX_RETRIES + 1} attempts. "
+            f"Issues: {last_failures}"
+        )
+
+    if last_parsed is not None:
+        return last_parsed
+
+    raise ValueError("Generation failed after all retries")

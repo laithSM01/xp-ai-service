@@ -115,5 +115,10 @@ async def suggest_workout(client: ClientData):
     try:
         result = await orchestrator_run(client)
         return {"suggestions": result}
+    except ValueError as e:
+        msg = str(e)
+        if "safe workout" in msg:
+            return {"error": "Could not generate a safe program for this client's injury. Please review the injury notes and try again."}
+        return {"error": msg}
     except Exception as e:
         return {"error": str(e)}
