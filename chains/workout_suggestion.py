@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # llm = ChatAnthropic(model="claude-sonnet-4-20250514")
-llm = ChatOllama(model="deepseek-r1:8b")
+llm = ChatOllama(model="qwen2.5:7b", num_ctx=8192)
 
 # ═══════════════════════════════════════
 # CHAIN 1 — ANALYSIS

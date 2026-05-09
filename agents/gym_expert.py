@@ -12,7 +12,7 @@ from chains.workout_suggestion import analysis_chain, enforce_rules
 from chains.tiers import get_generation_chain
 from rag import get_injury_context
 
-llm = ChatOllama(model="deepseek-r1:8b")
+llm = ChatOllama(model="deepseek-r1:14b", num_ctx=8192)
 
 
 def _calculate_body_shape(weight: float, height: float, body_fat: float, muscle_mass: float) -> str:
@@ -137,6 +137,7 @@ async def run(client) -> dict:
 
         from evaluator import evaluate
         result = evaluate(enforced, tier.lower(), injury_context)
+        print(f"Evaluator: passed={result.passed} failures={result.failures}")
 
         if result.passed:
             return enforced
